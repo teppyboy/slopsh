@@ -10,6 +10,7 @@
 #define MAX_LINE     80
 #define MAX_ARGS     40
 #define HISTORY_SIZE 36
+#define MAX_EXPANDED 4096
 
 /* ── Raw mode ──────────────────────────────────────────────────── */
 
@@ -177,8 +178,8 @@ static char *expand_env_vars(const char *tok, char *out, int outlen) {
 static int parse_input(char *input, char *args[], int *background,
                        char **in_file, char **out_file, int *pipe_pos)
 {
-    static char exp_bufs[MAX_ARGS][MAX_LINE];
-    static char exp_in[MAX_LINE], exp_out[MAX_LINE];
+    static char exp_bufs[MAX_ARGS][MAX_EXPANDED];
+    static char exp_in[MAX_EXPANDED], exp_out[MAX_EXPANDED];
     *background = 0; *in_file = NULL; *out_file = NULL; *pipe_pos = -1;
     int argc = 0;
     char *tok = strtok(input, " \t\n");
@@ -186,15 +187,15 @@ static int parse_input(char *input, char *args[], int *background,
         if      (!strcmp(tok, "&")) { *background = 1; }
         else if (!strcmp(tok, "<")) {
             if ((tok = strtok(NULL, " \t\n")))
-                *in_file = expand_env_vars(tok, exp_in, MAX_LINE);
+                *in_file = expand_env_vars(tok, exp_in, MAX_EXPANDED);
         }
         else if (!strcmp(tok, ">")) {
             if ((tok = strtok(NULL, " \t\n")))
-                *out_file = expand_env_vars(tok, exp_out, MAX_LINE);
+                *out_file = expand_env_vars(tok, exp_out, MAX_EXPANDED);
         }
         else if (!strcmp(tok, "|")) { *pipe_pos = argc; args[argc++] = NULL; }
         else {
-            expand_env_vars(tok, exp_bufs[argc], MAX_LINE);
+            expand_env_vars(tok, exp_bufs[argc], MAX_EXPANDED);
             args[argc] = exp_bufs[argc];
             argc++;
         }
