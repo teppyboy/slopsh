@@ -5,6 +5,7 @@
 #include <sys/wait.h>
 #include <fcntl.h>
 #include <termios.h>
+#include <ctype.h>
 
 #define MAX_LINE     80
 #define MAX_ARGS     40
@@ -140,18 +141,63 @@ static int read_line(char *buf, int maxlen, const char *prompt) {
 
 /* ── Parser ────────────────────────────────────────────────────── */
 
+static char *expand_env_vars(const char *tok, char *out, int outlen) {
+    int i = 0, j = 0;
+    while (tok[i] && j < outlen - 1) {
+        if (tok[i] == '$') {
+            i++;
+            char varname[256];
+            int k = 0;
+            if (tok[i] == '{') {
+                i++;
+                while (tok[i] && tok[i] != '}' && k < (int)sizeof(varname) - 1)
+                    varname[k++] = tok[i++];
+                if (tok[i] == '}') i++;
+            } else {
+                while ((isalnum((unsigned char)tok[i]) || tok[i] == '_') && k < (int)sizeof(varname) - 1)
+                    varname[k++] = tok[i++];
+            }
+            varname[k] = 0;
+            if (k > 0) {
+                const char *val = getenv(varname);
+                if (val)
+                    while (*val && j < outlen - 1)
+                        out[j++] = *val++;
+            } else {
+                out[j++] = '$';
+            }
+        } else {
+            out[j++] = tok[i++];
+        }
+    }
+    out[j] = 0;
+    return out;
+}
+
 static int parse_input(char *input, char *args[], int *background,
                        char **in_file, char **out_file, int *pipe_pos)
 {
+    static char exp_bufs[MAX_ARGS][MAX_LINE];
+    static char exp_in[MAX_LINE], exp_out[MAX_LINE];
     *background = 0; *in_file = NULL; *out_file = NULL; *pipe_pos = -1;
     int argc = 0;
     char *tok = strtok(input, " \t\n");
     while (tok && argc < MAX_ARGS - 1) {
         if      (!strcmp(tok, "&")) { *background = 1; }
-        else if (!strcmp(tok, "<")) { if ((tok = strtok(NULL, " \t\n"))) *in_file  = tok; }
-        else if (!strcmp(tok, ">")) { if ((tok = strtok(NULL, " \t\n"))) *out_file = tok; }
+        else if (!strcmp(tok, "<")) {
+            if ((tok = strtok(NULL, " \t\n")))
+                *in_file = expand_env_vars(tok, exp_in, MAX_LINE);
+        }
+        else if (!strcmp(tok, ">")) {
+            if ((tok = strtok(NULL, " \t\n")))
+                *out_file = expand_env_vars(tok, exp_out, MAX_LINE);
+        }
         else if (!strcmp(tok, "|")) { *pipe_pos = argc; args[argc++] = NULL; }
-        else                        { args[argc++] = tok; }
+        else {
+            expand_env_vars(tok, exp_bufs[argc], MAX_LINE);
+            args[argc] = exp_bufs[argc];
+            argc++;
+        }
         tok = strtok(NULL, " \t\n");
     }
     args[argc] = NULL;
@@ -216,6 +262,7 @@ int main(void)
         char cwd[1024], hostname[256], prompt[512];
         const char *home = getenv("HOME");
         const char *user = getenv("USER");
+        if (!user) user = getenv("USERNAME");
         getcwd(cwd, sizeof(cwd));
         gethostname(hostname, sizeof(hostname));
         char *dot = strchr(hostname, '.'); if (dot) *dot = 0;
